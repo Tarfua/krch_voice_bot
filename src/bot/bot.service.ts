@@ -15,8 +15,9 @@ interface BotContext extends Context {
     lastMessageId?: number;
     lastVoiceFileId?: string;
     waitingForAdmin?: boolean;
+    currentMenuMessageId?: number; // Add this line to track the current menu message
   };
-  callbackQuery: CallbackQuery.DataQuery; // Додаємо цей рядок
+  callbackQuery: CallbackQuery.DataQuery;
 }
 
 @Injectable()
@@ -39,44 +40,64 @@ export class BotService {
         waitingForCaption: false,
         lastMessageId: undefined,
         lastVoiceFileId: undefined,
-        waitingForAdmin: false, // Додано для управління адміністраторами
+        waitingForAdmin: false,
+        currentMenuMessageId: undefined, // Initialize the menu message tracker
       };
     }
+  }
+
+  private async sendNewMenu(ctx: BotContext, text: string, keyboard: any) {
+    if (ctx.session.currentMenuMessageId) {
+      try {
+        await ctx.telegram.deleteMessage(
+          ctx.chat.id,
+          ctx.session.currentMenuMessageId,
+        );
+      } catch (error) {
+        console.error('Error deleting previous menu:', error);
+      }
+    }
+
+    const newMenu = await ctx.reply(text, {
+      reply_markup: {
+        inline_keyboard: keyboard,
+      },
+    });
+    ctx.session.currentMenuMessageId = newMenu.message_id;
+
+    if (ctx.callbackQuery) {
+      await ctx.answerCbQuery();
+    }
+  }
+
+  private async showMainMenu(ctx: BotContext) {
+    const mainMenuKeyboard = [
+      [
+        { text: 'Додати цитату', callback_data: 'add_quote' },
+        { text: 'Управління цитатами', callback_data: 'manage_quotes' },
+      ],
+      [{ text: 'Керувати адміністраторами', callback_data: 'manage_admins' }],
+    ];
+
+    await this.sendNewMenu(ctx, 'Виберіть дію:', mainMenuKeyboard);
   }
 
   @Start()
   async start(@Ctx() ctx: BotContext) {
     this.initSession(ctx);
-
     const isAdmin = await this.isAdmin(ctx.from.id);
 
     if (!isAdmin) {
-      await ctx.reply('Щоб скористатися ботом використовуйте inline-режим.');
+      await this.sendNewMenu(
+        ctx,
+        'Щоб скористатися ботом використовуйте inline-режим.',
+        [],
+      );
       return;
     }
 
-    await ctx.reply('Вітаю! Я бот для голосових цитат. Виберіть дію:', {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Додати цитату',
-              callback_data: 'add_quote',
-            },
-            {
-              text: 'Управління цитатами',
-              callback_data: 'manage_quotes',
-            },
-          ],
-          [
-            {
-              text: 'Керувати адміністраторами',
-              callback_data: 'manage_admins',
-            },
-          ],
-        ],
-      },
-    });
+    await ctx.reply('Вітаю! Я бот для голосових цитат.');
+    await this.showMainMenu(ctx);
   }
 
   @Action('manage_quotes')
@@ -84,11 +105,9 @@ export class BotService {
     const voices = await this.voiceService.getAllVoices();
 
     if (voices.length === 0) {
-      await ctx.reply('Наразі немає збережених цитат.', {
-        reply_markup: {
-          inline_keyboard: [[{ text: 'Назад', callback_data: 'back_to_menu' }]],
-        },
-      });
+      await this.sendNewMenu(ctx, 'Наразі немає збережених цитат.', [
+        [{ text: 'Назад', callback_data: 'back_to_menu' }],
+      ]);
       return;
     }
 
@@ -214,22 +233,18 @@ export class BotService {
 
   @Action('manage_admins')
   async onManageAdmins(@Ctx() ctx: BotContext) {
-    await ctx.reply('Ви можете додати або видалити адміністратора.', {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Додати адміністратора',
-              callback_data: 'add_admin',
-            },
-            {
-              text: 'Повернутися в меню',
-              callback_data: 'back_to_menu',
-            },
-          ],
-        ],
-      },
-    });
+    const adminMenuKeyboard = [
+      [
+        { text: 'Додати адміністратора', callback_data: 'add_admin' },
+        { text: 'Повернутися в меню', callback_data: 'back_to_menu' },
+      ],
+    ];
+
+    await this.sendNewMenu(
+      ctx,
+      'Ви можете додати або видалити адміністратора.',
+      adminMenuKeyboard,
+    );
   }
 
   // Обробник для додавання адміністратора
@@ -244,7 +259,7 @@ export class BotService {
   // Повернення в меню
   @Action('back_to_menu')
   async onBackToMenu(@Ctx() ctx: BotContext) {
-    await this.start(ctx);
+    await this.showMainMenu(ctx);
   }
 
   @Action('add_quote')
