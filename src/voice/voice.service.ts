@@ -24,4 +24,12 @@ export class VoiceService {
       .limit(50)
       .exec();
   }
+
+  async getAllVoices() {
+    return this.voiceModel.find().exec();
+  }
+
+  async deleteVoice(quoteId: any) {
+    return this.voiceModel.deleteOne({ _id: quoteId }).exec();
+  }
 }
